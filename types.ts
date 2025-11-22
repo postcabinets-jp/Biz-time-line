@@ -17,12 +17,15 @@ export interface Comment {
 }
 
 export interface AITask {
-  id: string; // Added unique ID
+  id: string;
   title: string;
   description: string;
   priority: 'High' | 'Medium' | 'Low';
   assigneeSuggestion: string;
-  isCompleted: boolean; // Added status
+  isCompleted: boolean;
+  source: 'post' | 'meeting'; // タスクの発生源
+  sourceId: string;           // 発生源のID
+  sourceTitle?: string;       // 発生源のタイトル（会議名など）
 }
 
 export interface AIKnowledge {
@@ -31,7 +34,6 @@ export interface AIKnowledge {
   content: string;
 }
 
-// 保存されたナレッジアイテム用
 export interface KnowledgeItem extends AIKnowledge {
   id: string;
   sourcePostId: string;
@@ -57,10 +59,47 @@ export interface Post {
   aiAnalysis?: AIAnalysisResult | null;
 }
 
+export interface MeetingMinutes {
+  summary: string;
+  decisions: string[];
+  tasks: AITask[];
+  sentiment: 'Positive' | 'Neutral' | 'Negative';
+}
+
+export interface Meeting {
+  id: string;
+  title: string;
+  date: string;
+  participants: User[];
+  transcript: string; // 会議ログ
+  minutes?: MeetingMinutes | null; // AI生成議事録
+  isActive: boolean; // 会議中かどうか
+  type: 'video' | 'audio'; // 会議タイプ
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'model';
   text: string;
 }
 
-export type ViewState = 'feed' | 'reports' | 'profile' | 'knowledge' | 'tasks' | 'chat';
+export interface TeamHealthAnalysis {
+  score: number;
+  keywords: { word: string; count: number; trend: 'up' | 'down' | 'flat' }[];
+  advice: string;
+  keeps: string[];
+  problems: string[];
+  positivesCount: number;
+  negativesCount: number;
+}
+
+export interface Notification {
+  id: string;
+  type: 'like' | 'comment' | 'mention' | 'task';
+  content: string;
+  isRead: boolean;
+  createdAt: string;
+  user: User; // Originator
+}
+
+export type ViewState = 'feed' | 'reports' | 'profile' | 'knowledge' | 'tasks' | 'chat' | 'meetings' | 'pulse';

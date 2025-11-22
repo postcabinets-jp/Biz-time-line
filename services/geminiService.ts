@@ -1,40 +1,28 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { AIAnalysisResult, Post, KnowledgeItem, ChatMessage } from "../types";
+import { AIAnalysisResult, Post, KnowledgeItem, ChatMessage, Meeting, MeetingMinutes, TeamHealthAnalysis } from "../types";
 
 // Initialize Gemini Client
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+const MODEL_ID = 'gemini-2.5-flash';
 
 /**
  * Analyzes a single post to extract tasks, knowledge, and insights.
  */
 export const analyzePostWithAI = async (post: Post): Promise<AIAnalysisResult> => {
-  const modelId = 'gemini-2.5-flash';
-
   const prompt = `
-    あなたは日本の企業の優秀なAIアシスタントです。以下の社内SNSの投稿を分析してください。
+    以下の社内SNS投稿を分析し、タスク、ナレッジ、要約、感情を抽出してください。
     
-    投稿内容: "${post.caption}"
-    投稿者: ${post.user.name} (${post.user.department} / ${post.user.role})
+    投稿: "${post.caption}"
+    投稿者: ${post.user.name} (${post.user.department})
     
-    以下の情報を抽出し、JSON形式で出力してください。全てのテキストは自然な日本語で記述してください。
-    
-    1. 'tasks': テキストから読み取れる具体的なアクションアイテム（タスク）。
-       - title: タスク名（簡潔に）
-       - description: 詳細説明
-       - priority: 'High'(高), 'Medium'(中), 'Low'(低) のいずれか
-       - assigneeSuggestion: 文脈から推測される担当者または部署（不明な場合は「未定」）
-    2. 'knowledge': 全社的に共有すべき知見やルール（FAQ、手順、ベストプラクティス）。
-       - title: タイトル
-       - category: 'FAQ', 'How-To', 'Best Practice' のいずれか
-       - content: 内容の要約
-    3. 'summary': 投稿のビジネス上の価値や要点の1行要約。
-    4. 'sentiment': 'Positive'(ポジティブ), 'Neutral'(中立), 'Negative'(ネガティブ), 'Urgent'(緊急) のいずれか。
+    JSON形式で出力してください。
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: modelId,
+      model: MODEL_ID,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -76,74 +64,207 @@ export const analyzePostWithAI = async (post: Post): Promise<AIAnalysisResult> =
     
     const result = JSON.parse(text);
     
-    // Post-processing to add IDs and default status to tasks
-    const processedResult: AIAnalysisResult = {
+    return {
       ...result,
       tasks: result.tasks?.map((task: any, index: number) => ({
         ...task,
-        id: `task-${Date.now()}-${index}`,
-        isCompleted: false
+        id: `post-task-${post.id}-${index}`,
+        isCompleted: false,
+        source: 'post',
+        sourceId: post.id
       })) || []
     };
 
-    return processedResult;
-
   } catch (error) {
-    console.error("AI Analysis failed:", error);
+    console.error("Post analysis failed:", error);
     throw error;
   }
 };
 
 /**
- * Generates a weekly report based on a list of posts.
+ * Analyzes meeting transcript to generate minutes and tasks.
  */
-export const generateWeeklyReport = async (posts: Post[]): Promise<string> => {
-  const modelId = 'gemini-2.5-flash';
-  
-  const postsText = posts.map(p => 
-    `- [${p.createdAt.split('T')[0]}] ${p.user.name} (${p.user.department}): ${p.caption}`
-  ).join('\n');
-
+export const analyzeMeetingWithAI = async (meeting: Meeting): Promise<MeetingMinutes> => {
   const prompt = `
-    あなたは企業の経営企画担当AIです。以下の社内SNSの投稿一覧をもとに、経営層およびチームリーダー向けの「週次業務レポート」を作成してください。
-
-    【投稿データ】
-    ${postsText}
-
-    【出力形式】
-    Markdown形式で、以下の構成で記述してください。
-    言葉遣いは「です・ます」調の丁寧なビジネス文書としてください。
-
-    # 週次業務ハイライト
+    あなたはプロの議事録作成AIです。以下の会議ログから、議事録（要約、決定事項、タスク）を作成してください。
     
-    ## 1. 主な成果・進捗 (Key Achievements)
-    （具体的な成果を箇条書きで）
-
-    ## 2. 課題・リスク (Risks & Issues)
-    （注意が必要な点や発生したトラブル）
-
-    ## 3. 部署間連携の状況 (Collaboration)
-    （誰と誰が協力しているかなど）
-
-    ## 4. 来週へのアクション (Next Steps)
-    （推奨されるアクションアイテム）
+    会議名: ${meeting.title}
+    ログ:
+    ${meeting.transcript}
+    
+    JSON形式で出力してください。
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: modelId,
+      model: MODEL_ID,
       contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            summary: { type: Type.STRING, description: "会議全体の要約" },
+            decisions: { type: Type.ARRAY, items: { type: Type.STRING }, description: "決定事項のリスト" },
+            sentiment: { type: Type.STRING, enum: ['Positive', 'Neutral', 'Negative'] },
+            tasks: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  priority: { type: Type.STRING, enum: ['High', 'Medium', 'Low'] },
+                  assigneeSuggestion: { type: Type.STRING }
+                }
+              }
+            }
+          }
+        }
+      }
     });
+
+    const text = response.text;
+    if (!text) throw new Error("No response from AI");
     
-    return response.text || "レポートの生成に失敗しました。";
+    const result = JSON.parse(text);
+
+    return {
+      ...result,
+      tasks: result.tasks?.map((task: any, index: number) => ({
+        ...task,
+        id: `meeting-task-${meeting.id}-${index}`,
+        isCompleted: false,
+        source: 'meeting',
+        sourceId: meeting.id,
+        sourceTitle: meeting.title
+      })) || []
+    };
+
   } catch (error) {
-    console.error("Report generation failed:", error);
-    return "API制限または接続エラーによりレポートを生成できませんでした。";
+    console.error("Meeting analysis failed:", error);
+    throw error;
   }
 };
 
 /**
- * Chat with the AI Agent using context from posts and knowledge base.
+ * Analyzes team health based on posts and meetings.
+ */
+export const analyzeTeamHealth = async (posts: Post[], meetings: Meeting[]): Promise<TeamHealthAnalysis> => {
+  const postsText = posts.map(p => `[投稿] ${p.caption} (感情: ${p.aiAnalysis?.sentiment || '不明'})`).join('\n');
+  const meetingsText = meetings.map(m => `[会議] ${m.title}: ${m.minutes?.summary || 'なし'}`).join('\n');
+
+  const prompt = `
+    あなたは組織コンサルタントAIです。以下の社内データからチームの健全性を診断してください。
+
+    【データ】
+    ${postsText}
+    ${meetingsText}
+
+    以下の項目をJSONで出力してください：
+    1. score: 0-100の健全性スコア
+    2. keywords: 話題になっているキーワード5選（trendはup/down/flat）
+    3. advice: マネージャーへの具体的なアドバイス（150文字以内）
+    4. keeps: 良い点・続けるべきこと（2つ）
+    5. problems: 懸念点・課題（2つ）
+    6. positivesCount: 推定されるポジティブな反応の総数
+    7. negativesCount: 推定されるネガティブ・緊急な反応の総数
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: MODEL_ID,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            score: { type: Type.NUMBER },
+            keywords: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  word: { type: Type.STRING },
+                  count: { type: Type.NUMBER },
+                  trend: { type: Type.STRING, enum: ['up', 'down', 'flat'] }
+                }
+              }
+            },
+            advice: { type: Type.STRING },
+            keeps: { type: Type.ARRAY, items: { type: Type.STRING } },
+            problems: { type: Type.ARRAY, items: { type: Type.STRING } },
+            positivesCount: { type: Type.NUMBER },
+            negativesCount: { type: Type.NUMBER }
+          }
+        }
+      }
+    });
+
+    const text = response.text;
+    if (!text) throw new Error("No response from AI");
+    return JSON.parse(text) as TeamHealthAnalysis;
+  } catch (error) {
+    console.error("Team pulse analysis failed:", error);
+    // Return fallback data
+    return {
+      score: 70,
+      keywords: [{ word: "分析エラー", count: 0, trend: "flat" }],
+      advice: "データの分析に失敗しました。しばらく待ってから再試行してください。",
+      keeps: [],
+      problems: [],
+      positivesCount: 0,
+      negativesCount: 0
+    };
+  }
+};
+
+/**
+ * Generates a weekly report based on posts AND meetings.
+ */
+export const generateWeeklyReport = async (posts: Post[], meetings: Meeting[]): Promise<string> => {
+  const postsText = posts.map(p => 
+    `- [投稿] ${p.user.name}: ${p.caption}`
+  ).join('\n');
+
+  const meetingsText = meetings.map(m => 
+    `- [会議] ${m.title}: ${m.minutes ? m.minutes.summary : '議事録なし'}`
+  ).join('\n');
+
+  const prompt = `
+    あなたは企業の経営企画担当AIです。
+    以下の「社内SNS投稿」と「会議議事録」をもとに、今週の活動を総括する「週次業務レポート」を作成してください。
+
+    【投稿データ】
+    ${postsText}
+
+    【会議データ】
+    ${meetingsText}
+
+    【出力形式】
+    Markdown形式で、以下の構成で記述してください。
+    
+    # 週次業務ハイライト
+    ## 1. エグゼクティブサマリー
+    ## 2. プロジェクト進捗と決定事項
+    ## 3. 発生した課題と対応
+    ## 4. 来週のアクションプラン
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: MODEL_ID,
+      contents: prompt,
+    });
+    return response.text || "レポート生成失敗";
+  } catch (error) {
+    return "APIエラーによりレポートを生成できませんでした。";
+  }
+};
+
+/**
+ * Chat with Agent
  */
 export const chatWithAgent = async (
   message: string, 
@@ -151,62 +272,31 @@ export const chatWithAgent = async (
   contextPosts: Post[], 
   contextKnowledge: KnowledgeItem[]
 ): Promise<string> => {
-  const modelId = 'gemini-2.5-flash';
-
-  // Prepare context
-  const postsContext = contextPosts.map(p => `投稿者: ${p.user.name} (${p.createdAt}): ${p.caption}`).join('\n');
-  const knowledgeContext = contextKnowledge.map(k => `[${k.category}] ${k.title}: ${k.content}`).join('\n');
-  
-  // Extract all tasks from posts for context
-  const allTasks = contextPosts.flatMap(p => 
-    p.aiAnalysis?.tasks.map(t => 
-      `- [${t.isCompleted ? '完了' : '未完了'}] ${t.title} (優先度: ${t.priority}, 推奨担当: ${t.assigneeSuggestion})`
-    ) || []
-  ).join('\n');
+  const postsContext = contextPosts.slice(0, 10).map(p => `投稿(${p.user.name}): ${p.caption}`).join('\n');
+  const knowledgeContext = contextKnowledge.map(k => `ナレッジ(${k.title}): ${k.content}`).join('\n');
 
   const systemInstruction = `
     あなたは社内AIコンサルタント「BizAgent」です。
-    社内の投稿フィード、AIが抽出したタスク、保存されたナレッジベースにアクセスできます。
+    以下のコンテキストを活用して回答してください。
     
-    【現在のコンテキスト - 最近の投稿】
+    [最近の投稿]
     ${postsContext}
-
-    【現在のコンテキスト - 全タスク状況】
-    ${allTasks || "タスクはまだ抽出されていません。"}
-
-    【現在のコンテキスト - ナレッジベース】
-    ${knowledgeContext || "ナレッジはまだ保存されていません。"}
-
-    【指示】
-    - ユーザーの質問に対して、上記のコンテキスト情報を最大限活用して日本語で答えてください。
-    - コンテキストにない情報は、「社内データには見当たりませんが」と断った上で、一般的な知識で回答してください。
-    - 口調は丁寧なビジネス日本語（です・ます調）を使用してください。
-    - 投稿に言及する際は、「〇〇さんの投稿によると」のように誰の情報か明示してください。
-    - タスクについて聞かれたら、未完了のものを優先して教えてください。
+    
+    [ナレッジ]
+    ${knowledgeContext}
   `;
 
   try {
     const conversation = history.map(h => `${h.role === 'user' ? 'User' : 'Model'}: ${h.text}`).join('\n');
-    
-    const finalPrompt = `
-      ${systemInstruction}
-
-      【会話履歴】
-      ${conversation}
-
-      User: ${message}
-      Model:
-    `;
+    const finalPrompt = `${systemInstruction}\n\n${conversation}\nUser: ${message}\nModel:`;
 
     const response = await ai.models.generateContent({
-      model: modelId,
+      model: MODEL_ID,
       contents: finalPrompt,
     });
 
-    return response.text || "申し訳ありません、リクエストを処理できませんでした。";
-
+    return response.text || "エラーが発生しました。";
   } catch (error) {
-    console.error("Agent chat failed:", error);
-    return "現在サーバーに接続できません。しばらく待ってから再試行してください。";
+    return "接続エラーが発生しました。";
   }
 };

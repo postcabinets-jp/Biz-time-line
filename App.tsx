@@ -7,17 +7,21 @@ import { CreatePostModal } from './components/CreatePostModal';
 import { KnowledgeBase } from './components/KnowledgeBase';
 import { AIAgentChat } from './components/AIAgentChat';
 import { TaskManager } from './components/TaskManager';
-import { Post, ViewState, KnowledgeItem, AIKnowledge, ChatMessage } from './types';
-import { INITIAL_POSTS, CURRENT_USER } from './constants';
+import { MeetingRoom } from './components/MeetingRoom';
+import { TeamPulse } from './components/TeamPulse';
+import { UserProfile } from './components/UserProfile';
+import { Post, ViewState, KnowledgeItem, AIKnowledge, ChatMessage, Meeting, Notification } from './types';
+import { INITIAL_POSTS, INITIAL_MEETINGS, INITIAL_NOTIFICATIONS, CURRENT_USER } from './constants';
 
 function App() {
   const [currentView, setCurrentView] = useState<ViewState>('feed');
   const [posts, setPosts] = useState<Post[]>(INITIAL_POSTS);
+  const [meetings, setMeetings] = useState<Meeting[]>(INITIAL_MEETINGS);
+  const [notifications, setNotifications] = useState<Notification[]>(INITIAL_NOTIFICATIONS);
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
   const [isCreateModalOpen, setCreateModalOpen] = useState(false);
   const [isAgentOpen, setIsAgentOpen] = useState(false);
   
-  // Global Chat State
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { id: '1', role: 'model', text: 'こんにちは！BizAgentです。\n社内のタスク抽出、ナレッジの検索、投稿内容の要約などをお手伝いします。\n何かお困りのことはありますか？' }
   ]);
@@ -40,25 +44,58 @@ function App() {
     setKnowledgeItems([newItem, ...knowledgeItems]);
   };
 
-  const handleToggleTask = (postId: string, taskId: string) => {
-    setPosts(posts.map(post => {
-      if (post.id !== postId || !post.aiAnalysis) return post;
-      
-      const updatedTasks = post.aiAnalysis.tasks.map(task => {
-        if (task.id === taskId) {
-          return { ...task, isCompleted: !task.isCompleted };
-        }
-        return task;
-      });
+  // Unified Task Toggling
+  const handleToggleTask = (sourceId: string, taskId: string, source: 'post' | 'meeting' = 'post') => {
+    if (source === 'post') {
+      setPosts(posts.map(post => {
+        if (post.id !== sourceId || !post.aiAnalysis) return post;
+        const updatedTasks = post.aiAnalysis.tasks.map(task => {
+          if (task.id === taskId) return { ...task, isCompleted: !task.isCompleted };
+          return task;
+        });
+        return { ...post, aiAnalysis: { ...post.aiAnalysis, tasks: updatedTasks } };
+      }));
+    } else if (source === 'meeting') {
+      setMeetings(meetings.map(meeting => {
+        if (meeting.id !== sourceId || !meeting.minutes) return meeting;
+        const updatedTasks = meeting.minutes.tasks.map(task => {
+          if (task.id === taskId) return { ...task, isCompleted: !task.isCompleted };
+          return task;
+        });
+        return { ...meeting, minutes: { ...meeting.minutes, tasks: updatedTasks } };
+      }));
+    }
+  };
 
-      return {
-        ...post,
-        aiAnalysis: {
-          ...post.aiAnalysis,
-          tasks: updatedTasks
-        }
-      };
-    }));
+  const handleAddMeeting = (newMeeting: Meeting) => {
+    setMeetings([newMeeting, ...meetings]);
+  };
+
+  const handleUpdateMeeting = (updatedMeeting: Meeting) => {
+    setMeetings(meetings.map(m => m.id === updatedMeeting.id ? updatedMeeting : m));
+  };
+  
+  // Helper to aggregate tasks for profile
+  const getAllTasks = () => {
+    const postTasks = posts.flatMap(post => {
+      if (!post.aiAnalysis?.tasks) return [];
+      return post.aiAnalysis.tasks.map(task => ({
+        ...task,
+        sourceType: 'post',
+        sourceId: post.id,
+        date: post.createdAt
+      }));
+    });
+    const meetingTasks = meetings.flatMap(meeting => {
+      if (!meeting.minutes?.tasks) return [];
+      return meeting.minutes.tasks.map(task => ({
+        ...task,
+        sourceType: 'meeting',
+        sourceId: meeting.id,
+        date: meeting.date
+      }));
+    });
+    return [...postTasks, ...meetingTasks];
   };
 
   const renderContent = () => {
@@ -72,17 +109,21 @@ function App() {
                 post={post} 
                 onUpdatePost={handleUpdatePost}
                 onSaveKnowledge={handleSaveKnowledge}
-                onToggleTask={handleToggleTask}
+                onToggleTask={(pid, tid) => handleToggleTask(pid, tid, 'post')}
               />
             ))}
           </div>
         );
       case 'tasks':
-        return <TaskManager posts={posts} onToggleTask={handleToggleTask} />;
+        return <TaskManager posts={posts} meetings={meetings} onToggleTask={handleToggleTask} />;
       case 'knowledge':
         return <KnowledgeBase items={knowledgeItems} posts={posts} />;
       case 'reports':
-        return <ReportGenerator posts={posts} />;
+        return <ReportGenerator posts={posts} meetings={meetings} />;
+      case 'meetings':
+        return <MeetingRoom meetings={meetings} onAddMeeting={handleAddMeeting} onUpdateMeeting={handleUpdateMeeting} />;
+      case 'pulse':
+        return <TeamPulse posts={posts} meetings={meetings} />;
       case 'chat':
         return (
           <AIAgentChat 
@@ -96,16 +137,15 @@ function App() {
         );
       case 'profile':
         return (
-          <div className="flex flex-col items-center justify-center h-[60vh] text-gray-500">
-            <div className="bg-white p-8 rounded-2xl shadow-sm text-center max-w-md">
-                <img src={CURRENT_USER.avatar} className="w-24 h-24 rounded-full mx-auto mb-4 ring-4 ring-blue-50" alt="profile" />
-                <h2 className="text-2xl font-bold text-gray-900">{CURRENT_USER.name}</h2>
-                <p className="text-blue-600 font-medium">{CURRENT_USER.role} • {CURRENT_USER.department}</p>
-                <p className="mt-4 text-gray-600">
-                  プロフィール設定と個人の活動分析機能はここに実装予定です。
-                </p>
-            </div>
-          </div>
+          <UserProfile 
+            user={CURRENT_USER} 
+            posts={posts} 
+            tasks={getAllTasks()} 
+            knowledge={knowledgeItems}
+            onUpdatePost={handleUpdatePost}
+            onSaveKnowledge={handleSaveKnowledge}
+            onToggleTask={handleToggleTask}
+          />
         );
       default:
         return <div>Not found</div>;
@@ -116,6 +156,8 @@ function App() {
     <>
       <Layout 
         currentView={currentView} 
+        currentUser={CURRENT_USER}
+        notifications={notifications}
         onChangeView={setCurrentView}
         onOpenCreateModal={() => setCreateModalOpen(true)}
         onToggleAgent={() => setIsAgentOpen(!isAgentOpen)}
@@ -130,7 +172,6 @@ function App() {
         onCreate={handleCreatePost}
       />
 
-      {/* The floating chat modal - only show if not in full page chat mode */}
       {currentView !== 'chat' && (
         <AIAgentChat 
           variant="modal"

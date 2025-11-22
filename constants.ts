@@ -1,5 +1,5 @@
 
-import { Post, User } from './types';
+import { Post, User, Meeting, Notification } from './types';
 
 export const CURRENT_USER: User = {
   id: 'u1',
@@ -61,5 +61,80 @@ export const INITIAL_POSTS: Post[] = [
     hashtags: ['#リリース報告', '#開発', '#システム移行', '#注意喚起'],
     comments: [],
     createdAt: '2023-11-06T10:15:00Z',
+  }
+];
+
+export const INITIAL_MEETINGS: Meeting[] = [
+  {
+    id: 'm1',
+    title: '週次進捗定例 (開発部)',
+    date: '2023-11-09T10:00:00Z',
+    participants: [CURRENT_USER, MOCK_USERS['u2']],
+    transcript: `
+田中: お疲れ様です。今週の進捗確認を始めます。認証基盤の移行は無事完了しました。
+佐藤: お疲れ様でした。ユーザーからの問い合わせは来ていますか？
+田中: 現状ゼロです。ただ、念のため今週いっぱいは監視体制を強化します。
+佐藤: わかりました。あと、来月の社員総会のLT大会ですが、開発部から誰か登壇できますか？
+田中: あー、忘れてました。若手の高橋君に声をかけてみます。
+佐藤: お願いします。締め切りが来週水曜なので早めにお願いします。
+    `,
+    isActive: false,
+    type: 'video',
+    minutes: {
+      summary: '認証基盤移行の完了報告と、社員総会LT登壇者の選定について議論した。',
+      decisions: ['認証基盤の監視を今週いっぱい継続する', '社員総会のLT登壇者候補として高橋氏に打診する'],
+      sentiment: 'Positive',
+      tasks: [
+        {
+          id: 'mt1',
+          title: 'システム監視体制の継続',
+          description: '認証基盤移行後の安定稼働確認のため、今週いっぱいは監視を強化する',
+          priority: 'High',
+          assigneeSuggestion: '開発部',
+          isCompleted: false,
+          source: 'meeting',
+          sourceId: 'm1',
+          sourceTitle: '週次進捗定例'
+        },
+        {
+          id: 'mt2',
+          title: '社員総会LT登壇者の打診',
+          description: '若手の高橋君に登壇可能か確認する',
+          priority: 'Medium',
+          assigneeSuggestion: '田中 健太',
+          isCompleted: false,
+          source: 'meeting',
+          sourceId: 'm1',
+          sourceTitle: '週次進捗定例'
+        }
+      ]
+    }
+  }
+];
+
+export const INITIAL_NOTIFICATIONS: Notification[] = [
+  {
+    id: 'n1',
+    type: 'like',
+    content: '鈴木さんがあなたの投稿「認証基盤移行...」にいいねしました',
+    isRead: false,
+    createdAt: '2023-11-09T10:30:00Z',
+    user: MOCK_USERS['u3']
+  },
+  {
+    id: 'n2',
+    type: 'mention',
+    content: '佐藤さんが投稿であなたをメンションしました：「...特に田中さん(@kenta.tanaka)の...」',
+    isRead: false,
+    createdAt: '2023-11-07T18:00:00Z',
+    user: MOCK_USERS['u2']
+  },
+  {
+    id: 'n3',
+    type: 'task',
+    content: 'AIが会議「週次進捗定例」から新しいタスクを割り当てました',
+    isRead: true,
+    createdAt: '2023-11-09T11:00:00Z',
+    user: { ...CURRENT_USER, name: 'BizAgent AI' } // System notification
   }
 ];

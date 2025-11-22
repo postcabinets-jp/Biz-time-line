@@ -1,5 +1,8 @@
 {
   "name": "BizSocial AI",
   "description": "A corporate social platform integrated with AI agents to automate task extraction, knowledge management, and reporting.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
 }
